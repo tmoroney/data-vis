@@ -98,7 +98,7 @@ export default function Home() {
                   variant="outline"
                   role="combobox"
                   aria-expanded={open}
-                  className="justify-between w-full mt-4"
+                  className="justify-between w-full mt-4 overflow-hidden"
                 >
                   {value
                     ? categories.find((category) => category.value === value)?.label
@@ -108,9 +108,9 @@ export default function Home() {
               </PopoverTrigger>
               <PopoverContent className="p-0">
                 <Command>
-                  <CommandInput placeholder="Search trade category..." />
+                  <CommandInput placeholder="Search trade categories..." />
                   <CommandList>
-                    <CommandEmpty>No framework found.</CommandEmpty>
+                    <CommandEmpty>No category found.</CommandEmpty>
                     <CommandGroup>
                       {categories.map((category) => (
                         <CommandItem

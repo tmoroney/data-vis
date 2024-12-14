@@ -13,11 +13,12 @@ interface MapProps {
 
 export default function Map({ data, category, year }: MapProps) {
     const containerRef = useRef<HTMLDivElement | null>(null);
+    let zoomLevel = useRef(1);
+    let rotation = useRef<[number, number, number]>([8.2439, -53.4129, 0]);
 
     async function drawMap() {
         if (!containerRef.current) return;
 
-        // create map of countries
         const width = window.innerWidth;
         const height = window.innerHeight;
 
@@ -43,7 +44,6 @@ export default function Map({ data, category, year }: MapProps) {
         const context = canvas.getContext('2d');
         if (!context) return;
 
-        // Calculate star positions for the background
         const numStars = 200;
         const stars = Array.from({ length: numStars }, () => ({
             x: Math.random() * width,
@@ -51,12 +51,10 @@ export default function Map({ data, category, year }: MapProps) {
             radius: Math.random() * 1.5
         }));
 
-        // Draw the black background with stars (purely aesthetic)
         const drawBackground = () => {
             context.fillStyle = "black";
             context.fillRect(0, 0, width, height);
 
-            // Draw precomputed stars
             stars.forEach(star => {
                 context.beginPath();
                 context.arc(star.x, star.y, star.radius, 0, 2 * Math.PI);
@@ -75,24 +73,23 @@ export default function Map({ data, category, year }: MapProps) {
         if (!irelandCoords) return;
 
         const projection = d3.geoOrthographic()
-            .scale(Math.min(width, height) / 2.2)
+            .scale(Math.min(width, height) / 2.2 * zoomLevel.current)
             .translate([width / 2, height / 2])
             .clipAngle(90)
-            .rotate([8.2439, -53.4129]); // Center the sphere on Ireland
+            .rotate(rotation.current);
 
         const path = d3.geoPath(projection, context);
 
-        // Initial rotation centered on Ireland
-        let rotation: [number, number, number] = [8.2439, -53.4129, 0];
-        let zoomLevel = 1;
-
-        const batchedLines = () => {
+        const drawLinks = () => {
             const links = [];
-            let total = 0;
+            let maxExportValue = 0;
+
             for (let i = 0; i < data.length; i++) {
-                if (data[i]["Commodity Group"] != category || data[i]["Year"] != year ) continue;
-                const country = data[i].Country;
+                if (data[i]["Commodity Group"] !== category || data[i]["Year"] !== year) continue;
+                let country = data[i].Country;
                 const exportValue = Number(data[i]["VALUE"]);
+
+                if (country === "USA") country = "United States of America";
 
                 const targetCountry = countries.features.find(
                     (f) => f.properties?.name === country
@@ -104,26 +101,26 @@ export default function Map({ data, category, year }: MapProps) {
                         links.push({
                             source: irelandCoords,
                             target: targetCoords,
-                            exportValue: exportValue,
-                            value: 0 // Initialize value property
+                            exportValue,
+                            value: 0
                         });
                     }
                 }
-                total += exportValue;
-            }
-            
-            // Calculate the percentage of the maximum value for the links
-            for (let i = 0; i < links.length; i++) {
-                links[i]["value"] = links[i].exportValue / total;
+                if (exportValue > maxExportValue) {
+                    maxExportValue = exportValue;
+                }
             }
 
-            // Draw the links with a gradient effect
             links.forEach(link => {
-                const { source, target, exportValue, value } = link;
-                const lineWidth = exportValue * 0.0000025; // Full width of the line
+                link.value = (link.exportValue / maxExportValue);
+            });
 
+            links.forEach(link => {
+                const { source, target, value } = link;
+                const lineWidth = value * 50;
                 const interpolate = d3.geoInterpolate(source, target);
-                const steps = 100; // Number of steps for the gradient effect
+                const steps = 100;
+                const color = d3.interpolateRainbow(value);
 
                 for (let i = 0; i < steps; i++) {
                     const t1 = i / steps;
@@ -136,8 +133,9 @@ export default function Map({ data, category, year }: MapProps) {
                         type: "LineString",
                         coordinates: [point1, point2]
                     } as d3.GeoPermissibleObjects);
-                    context.strokeStyle = "rgba(255, 0, 0, 0.7)"; // Color of the line
-                    context.lineWidth = 0.4 + (lineWidth * t2); // Start with a width of 0.2 and gradually increase
+                    context.strokeStyle = d3.color(color)?.copy({ opacity: 0.8 }).toString() || color;
+                    context.lineWidth = 1 + (lineWidth * t2);
+                    context.lineCap = "round";
                     context.stroke();
                 }
             });
@@ -167,8 +165,8 @@ export default function Map({ data, category, year }: MapProps) {
                     } else {
                         context.fillStyle = '#C2D784';
                     }
-                    context.strokeStyle = 'rgba(0, 0, 0, 0.5)'; // Set border opacity to 50%
-                    context.lineWidth = 0.2 * zoomLevel;
+                    context.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+                    context.lineWidth = 0.2 * zoomLevel.current;
                     context.fill();
 
                     if (context.lineWidth < 0.4) {
@@ -179,7 +177,7 @@ export default function Map({ data, category, year }: MapProps) {
                 });
             }
 
-            batchedLines();
+            drawLinks();
 
             context.restore();
         };
@@ -191,11 +189,11 @@ export default function Map({ data, category, year }: MapProps) {
             .on('drag', (event) => {
                 const dx = event.dx;
                 const dy = event.dy;
-                const rotationSpeed = 0.2 / zoomLevel;
-                rotation[0] += dx * rotationSpeed;
-                rotation[1] -= dy * rotationSpeed;
+                const rotationSpeed = 0.2 / zoomLevel.current;
+                rotation.current[0] += dx * rotationSpeed;
+                rotation.current[1] -= dy * rotationSpeed;
 
-                projection.rotate(rotation);
+                projection.rotate(rotation.current);
                 draw();
             });
 
@@ -206,12 +204,12 @@ export default function Map({ data, category, year }: MapProps) {
         const zoom = d3.zoom<HTMLCanvasElement, unknown>()
             .scaleExtent([1, 9])
             .on('zoom', (event) => {
-                zoomLevel = event.transform.k;
-                projection.scale(Math.min(width, height) / 2.2 * zoomLevel);
-                draw();
+            zoomLevel.current = event.transform.k;
+            projection.scale(Math.min(width, height) / 2.2 * zoomLevel.current);
+            draw();
             });
 
-        d3.select(canvas).call(zoom);
+        d3.select(canvas).call(zoom).call(zoom.transform, d3.zoomIdentity.scale(zoomLevel.current));
 
         canvas.addEventListener('mousemove', (event) => {
             const [x, y] = [event.offsetX, event.offsetY];
@@ -248,6 +246,10 @@ export default function Map({ data, category, year }: MapProps) {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
+
+    useEffect(() => {
+        drawMap();
+    }, [category, year]);
 
     return <div ref={containerRef}></div>;
 }

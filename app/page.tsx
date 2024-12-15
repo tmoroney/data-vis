@@ -79,7 +79,7 @@ export default function Home() {
   return (
     <>
       <main className="relative min-h-screen">
-        <div className="fixed top-4 right-4 z-50">
+        <div className="fixed top-4 left-4 z-50">
           <Card className="w-80 bg-background/70 backdrop-blur-sm shadow-lg">
             <CardContent className="p-4">
               <YearSlider

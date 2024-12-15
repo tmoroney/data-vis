@@ -15,7 +15,7 @@ interface MapProps {
 
 export default function GlobeMap({ data, category, year, onCountrySelect }: MapProps) {
     const containerRef = useRef<HTMLDivElement | null>(null);
-    let zoomLevel = useRef(1);
+    let zoomLevel = useRef(0.8);
     let rotation = useRef<[number, number, number]>([8.2439, -53.4129, 0]);
 
     async function drawMap() {
@@ -63,11 +63,17 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 context.fillStyle = "white";
                 context.fill();
             });
+
+            // Add title to the top center of the background
+            context.fillStyle = "white";
+            context.font = "24px Arial";
+            context.textAlign = "center";
+            context.fillText("Visualisation of Ireland's Global Exports", width / 2, 40);
         };
 
         const drawSankey = () => {
             if (!context) return;
-        
+
             // Prepare the trade data
             const tradeData: { [key: string]: number } = {};
             data.forEach((row) => {
@@ -77,7 +83,7 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                     tradeData[commodityGroup] = (tradeData[commodityGroup] || 0) + value;
                 }
             });
-        
+
             const country = "Ireland";
             const graph: SankeyGraph<
                 SankeyNode<{ id: string }, {}>,
@@ -93,8 +99,8 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 const value = objectEntries[i][1];
                 graph.nodes.push({ id: commodity });
                 graph.links.push({
-                    source: i,
-                    target: objectEntries.length,
+                    source: objectEntries.length,
+                    target: i,
                     value,
                 });
             }
@@ -102,32 +108,37 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
             graph.nodes.push({ id: country });
 
             console.log("Sankey graph:", graph);
-        
+
             if (graph.nodes.length === 1 || graph.links.length === 0) {
                 console.error("Sankey graph data is incomplete.");
                 return;
             }
-        
+
+            const paddingHeight = 20; // Adjust as needed
+            const padding = 20;
+            const width = canvas.width - padding * 2;
+            const height = canvas.height - paddingHeight * 2;
+
             // Create a Sankey generator
             const sankeyGenerator = sankey<SankeyNode<{ id: string }, {}>, SankeyLink<{}, {}>>()
-                .nodeWidth(15)
-                .nodePadding(10)
-                .extent([[0, 0], [canvas.width-100, canvas.height-20]]);
-        
+                .nodeWidth(80)
+                .nodePadding(6)
+                .extent([[padding, paddingHeight], [padding + width, paddingHeight + height]]);
+
             const sankeyData = sankeyGenerator(graph);
-        
+
             if (!sankeyData) {
                 console.error("Sankey generation failed.");
                 return;
             }
-        
+
             const { nodes, links } = sankeyData;
-        
+
             // Draw links
             links.forEach((link) => {
-                const sourceNode = link.source as SankeyNode<{}, {}>;
+                const sourceNode = link.source as SankeyNode<{ id: string }, {}>;
                 const targetNode = link.target as SankeyNode<{}, {}>;
-        
+
                 context.beginPath();
                 const gradient = context.createLinearGradient(
                     sourceNode.x1!,
@@ -135,10 +146,10 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                     targetNode.x0!,
                     targetNode.y1!
                 );
-        
-                gradient.addColorStop(0, "rgba(0, 128, 255, 0.5)");
+
+                gradient.addColorStop(0, "rgba(0, 128, 255, 0.7)");
                 gradient.addColorStop(1, "rgba(255, 128, 0, 0.5)");
-        
+
                 context.strokeStyle = gradient;
                 context.lineWidth = Math.max(1, link.width || 0);
                 context.moveTo(sourceNode.x1!, link.y0!);
@@ -152,9 +163,10 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 );
                 context.stroke();
             });
-        
+
             // Draw nodes
-            nodes.forEach((node) => {
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i];
                 context.beginPath();
                 context.rect(
                     node.x0!,
@@ -166,14 +178,55 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 context.fill();
                 context.strokeStyle = "#000";
                 context.stroke();
-        
+
                 // Add node labels
-                context.fillStyle = "#fff";
-                context.font = "12px Arial";
-                context.textAlign = "center";
-                const centerX = (node.x0! + node.x1!) / 2;
-                const centerY = (node.y0! + node.y1!) / 2;
-                context.fillText(node.id, centerX, centerY);
+                if (node.targetLinks?.length && node.targetLinks[0]?.width && node.targetLinks[0].width > 3 || node.id === country) {
+                    context.fillStyle = "rgba(255, 255, 255, 1)";
+                    context.font = "12px Arial";
+                    context.textAlign = "right";
+                    let centerX = (node.x0! + node.x1!) / 2 + 30;
+                    if (node.id === country) {
+                        context.textAlign = "center";
+                        centerX = (node.x0! + node.x1!) / 2;
+                        context.font = "20px Arial";
+                    }
+                    const centerY = (node.y0! + node.y1!) / 2;
+                    context.fillText(node.id, centerX, centerY);
+                }
+            };
+
+            // Prepare the tooltip
+            const tooltip = d3.select(containerRef.current)
+                .append('div')
+                .style('position', 'absolute')
+                .style('background', 'white')
+                .style('color', 'black')
+                .style('padding', '5px')
+                .style('border-radius', '5px')
+                .style('pointer-events', 'none')
+                .style('opacity', 0);
+
+            // Add mouseover event for tooltip
+            canvas.addEventListener('mousemove', (event) => {
+                const [x, y] = [event.offsetX, event.offsetY];
+                const hoveredNode = nodes.find((node) =>
+                    x >= node.x0! && x <= node.x1! && y >= node.y0! && y <= node.y1!
+                );
+                const value = hoveredNode ? hoveredNode.value : 0;
+
+                if (hoveredNode) {
+                    tooltip.style('opacity', 1)
+                        .html(`<b>Category:</b> ${hoveredNode.id.split('(')[0].trim()}<br/><b>Value:</b> \$${Number(value).toLocaleString()}`)
+                        .style('left', `${event.pageX - 300}px`)
+                        .style('top', `${event.pageY - 80}px`)
+                        .style('color', 'black');
+                } else {
+                    tooltip.style('opacity', 0);
+                }
+            });
+
+            canvas.addEventListener('mouseout', () => {
+                tooltip.style('opacity', 0);
             });
         };
 
@@ -201,9 +254,13 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
             for (let i = 0; i < data.length; i++) {
                 if (data[i]["Commodity Group"] !== category || data[i]["Year"] !== year) continue;
                 let country = data[i].Country;
-                const exportValue = Number(data[i]["VALUE"]);
+                let exportValue = Number(data[i]["VALUE"]);
 
                 if (country === "USA") country = "United States of America";
+                if (country === "Great Britain") {
+                    country = "United Kingdom";
+                    exportValue += Number(data[i + 1]["VALUE"]);
+                }
 
                 const targetCountry = countries.features.find(
                     (f) => f.properties?.name === country
@@ -234,7 +291,7 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 const { source, target, value, country } = link;
                 const lineWidth = value * 50;
                 const interpolate = d3.geoInterpolate(source, target);
-                const steps = 100;
+                const steps = 50;
                 const color = d3.interpolateRainbow(value);
 
                 for (let i = 0; i < steps; i++) {
@@ -364,7 +421,10 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 });
 
                 if (feature && feature.properties && feature.properties.name) {
-                    onCountrySelect(feature.properties.name);
+                    let country = feature.properties.name;
+                    if (country === "United States of America") country = "USA";
+                    if (country === "United Kingdom") country = "Great Britain";
+                    onCountrySelect(country);
                 }
             }
         });

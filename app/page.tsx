@@ -3,7 +3,7 @@ import { useState, useEffect } from "react"
 import { YearSlider } from "@/components/year-slider"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import Map from "@/components/globe-map"
+import GlobeMap from "@/components/globe-map"
 import PieChart from "@/components/pie-chart"
 import * as d3 from "d3"
 
@@ -142,7 +142,7 @@ export default function Home() {
         </div>
         {data.length > 0 ? (
           <div>
-            <Map data={data} category={value} year={year.toString()} onCountrySelect={handleSelectedCountry} />
+            <GlobeMap data={data} category={value} year={year.toString()} onCountrySelect={handleSelectedCountry} />
           </div>
         )
           : (

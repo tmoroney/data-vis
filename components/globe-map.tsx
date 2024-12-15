@@ -3,6 +3,7 @@ import * as d3 from "d3";
 import * as topojson from "topojson-client";
 import world from 'world-atlas/countries-50m.json';
 import { Topology, Objects } from "topojson-specification";
+import { sankey, sankeyLinkHorizontal, SankeyNode, SankeyLink, SankeyGraph } from "d3-sankey";
 
 interface WorldTopology extends Topology<Objects<GeoJSON.GeoJsonProperties>> { }
 interface MapProps {
@@ -12,7 +13,7 @@ interface MapProps {
     onCountrySelect: (country: string) => void;
 }
 
-export default function Map({ data, category, year, onCountrySelect }: MapProps) {
+export default function GlobeMap({ data, category, year, onCountrySelect }: MapProps) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     let zoomLevel = useRef(1);
     let rotation = useRef<[number, number, number]>([8.2439, -53.4129, 0]);
@@ -61,6 +62,118 @@ export default function Map({ data, category, year, onCountrySelect }: MapProps)
                 context.arc(star.x, star.y, star.radius, 0, 2 * Math.PI);
                 context.fillStyle = "white";
                 context.fill();
+            });
+        };
+
+        const drawSankey = () => {
+            if (!context) return;
+        
+            // Prepare the trade data
+            const tradeData: { [key: string]: number } = {};
+            data.forEach((row) => {
+                if (row["Year"] === year && row["Commodity Group"] !== "Total merchandise trade (0 - 9)") {
+                    const commodityGroup = row["Commodity Group"] as string;
+                    const value = Number(row["VALUE"]);
+                    tradeData[commodityGroup] = (tradeData[commodityGroup] || 0) + value;
+                }
+            });
+        
+            const country = "Ireland";
+            const graph: SankeyGraph<
+                SankeyNode<{ id: string }, {}>,
+                SankeyLink<{}, {}>
+            > = {
+                nodes: [],
+                links: [],
+            };
+
+            const objectEntries = Object.entries(tradeData);
+            for (let i = 0; i < objectEntries.length; i++) {
+                const commodity = objectEntries[i][0];
+                const value = objectEntries[i][1];
+                graph.nodes.push({ id: commodity });
+                graph.links.push({
+                    source: i,
+                    target: objectEntries.length,
+                    value,
+                });
+            }
+
+            graph.nodes.push({ id: country });
+
+            console.log("Sankey graph:", graph);
+        
+            if (graph.nodes.length === 1 || graph.links.length === 0) {
+                console.error("Sankey graph data is incomplete.");
+                return;
+            }
+        
+            // Create a Sankey generator
+            const sankeyGenerator = sankey<SankeyNode<{ id: string }, {}>, SankeyLink<{}, {}>>()
+                .nodeWidth(15)
+                .nodePadding(10)
+                .extent([[0, 0], [canvas.width-100, canvas.height-20]]);
+        
+            const sankeyData = sankeyGenerator(graph);
+        
+            if (!sankeyData) {
+                console.error("Sankey generation failed.");
+                return;
+            }
+        
+            const { nodes, links } = sankeyData;
+        
+            // Draw links
+            links.forEach((link) => {
+                const sourceNode = link.source as SankeyNode<{}, {}>;
+                const targetNode = link.target as SankeyNode<{}, {}>;
+        
+                context.beginPath();
+                const gradient = context.createLinearGradient(
+                    sourceNode.x1!,
+                    sourceNode.y0!,
+                    targetNode.x0!,
+                    targetNode.y1!
+                );
+        
+                gradient.addColorStop(0, "rgba(0, 128, 255, 0.5)");
+                gradient.addColorStop(1, "rgba(255, 128, 0, 0.5)");
+        
+                context.strokeStyle = gradient;
+                context.lineWidth = Math.max(1, link.width || 0);
+                context.moveTo(sourceNode.x1!, link.y0!);
+                context.bezierCurveTo(
+                    sourceNode.x1! + link.width! / 2,
+                    link.y0!,
+                    targetNode.x0! - link.width! / 2,
+                    link.y1!,
+                    targetNode.x0!,
+                    link.y1!
+                );
+                context.stroke();
+            });
+        
+            // Draw nodes
+            nodes.forEach((node) => {
+                context.beginPath();
+                context.rect(
+                    node.x0!,
+                    node.y0!,
+                    node.x1! - node.x0!,
+                    node.y1! - node.y0!
+                );
+                context.fillStyle = "#4682B4";
+                context.fill();
+                context.strokeStyle = "#000";
+                context.stroke();
+        
+                // Add node labels
+                context.fillStyle = "#fff";
+                context.font = "12px Arial";
+                context.textAlign = "center";
+                const centerX = (node.x0! + node.x1!) / 2;
+                const centerY = (node.y0! + node.y1!) / 2;
+                context.fillText(node.id, centerX, centerY);
             });
         };
 
@@ -148,6 +261,7 @@ export default function Map({ data, category, year, onCountrySelect }: MapProps)
             context.clearRect(0, 0, width, height);
 
             drawBackground();
+            drawSankey();
 
             context.beginPath();
             path({ type: "Sphere" });

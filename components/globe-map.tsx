@@ -9,9 +9,10 @@ interface MapProps {
     data: d3.DSVRowArray<string>;
     category: string;
     year: string;
+    onCountrySelect: (country: string) => void;
 }
 
-export default function Map({ data, category, year }: MapProps) {
+export default function Map({ data, category, year, onCountrySelect }: MapProps) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     let zoomLevel = useRef(1);
     let rotation = useRef<[number, number, number]>([8.2439, -53.4129, 0]);
@@ -81,7 +82,7 @@ export default function Map({ data, category, year }: MapProps) {
         const path = d3.geoPath(projection, context);
 
         const drawLinks = () => {
-            const links = [];
+            const links: { source: [number, number]; target: [number, number]; exportValue: number; country: string; value: number; }[] = [];
             let maxExportValue = 0;
 
             for (let i = 0; i < data.length; i++) {
@@ -102,6 +103,7 @@ export default function Map({ data, category, year }: MapProps) {
                             source: irelandCoords,
                             target: targetCoords,
                             exportValue,
+                            country,
                             value: 0
                         });
                     }
@@ -116,7 +118,7 @@ export default function Map({ data, category, year }: MapProps) {
             });
 
             links.forEach(link => {
-                const { source, target, value } = link;
+                const { source, target, value, country } = link;
                 const lineWidth = value * 50;
                 const interpolate = d3.geoInterpolate(source, target);
                 const steps = 100;
@@ -133,7 +135,7 @@ export default function Map({ data, category, year }: MapProps) {
                         type: "LineString",
                         coordinates: [point1, point2]
                     } as d3.GeoPermissibleObjects);
-                    context.strokeStyle = d3.color(color)?.copy({ opacity: 0.8 }).toString() || color;
+                    context.strokeStyle = color;
                     context.lineWidth = 1 + (lineWidth * t2);
                     context.lineCap = "round";
                     context.stroke();
@@ -202,11 +204,11 @@ export default function Map({ data, category, year }: MapProps) {
         draw();
 
         const zoom = d3.zoom<HTMLCanvasElement, unknown>()
-            .scaleExtent([1, 9])
+            .scaleExtent([0.8, 9])
             .on('zoom', (event) => {
-            zoomLevel.current = event.transform.k;
-            projection.scale(Math.min(width, height) / 2.2 * zoomLevel.current);
-            draw();
+                zoomLevel.current = event.transform.k;
+                projection.scale(Math.min(width, height) / 2.2 * zoomLevel.current);
+                draw();
             });
 
         d3.select(canvas).call(zoom).call(zoom.transform, d3.zoomIdentity.scale(zoomLevel.current));
@@ -237,6 +239,21 @@ export default function Map({ data, category, year }: MapProps) {
         canvas.addEventListener('mouseout', () => {
             tooltip.style('opacity', 0);
         });
+
+        canvas.addEventListener('click', (event) => {
+            const [x, y] = [event.offsetX, event.offsetY];
+            const invert = projection.invert ? projection.invert([x, y]) : null;
+
+            if (invert && "features" in countries) {
+                const feature = countries.features.find((f) => {
+                    return f.geometry && d3.geoContains(f, invert);
+                });
+
+                if (feature && feature.properties && feature.properties.name) {
+                    onCountrySelect(feature.properties.name);
+                }
+            }
+        });
     };
 
     useEffect(() => {
@@ -250,6 +267,7 @@ export default function Map({ data, category, year }: MapProps) {
     useEffect(() => {
         drawMap();
     }, [category, year]);
+
 
     return <div ref={containerRef}></div>;
 }

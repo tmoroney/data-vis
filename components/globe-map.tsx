@@ -23,14 +23,14 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
 
         const width = window.innerWidth;
         const height = window.innerHeight;
+        const baseScale = Math.min(width, height) / 2.2;
 
         d3.select(containerRef.current).selectAll('*').remove();
 
-        const canvas = d3.select(containerRef.current)
-            .append('canvas')
+        const svg = d3.select(containerRef.current)
+            .append('svg')
             .attr('width', width)
-            .attr('height', height)
-            .node() as HTMLCanvasElement;
+            .attr('height', height);
 
         const tooltip = d3.select(containerRef.current)
             .append('div')
@@ -43,9 +43,6 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
             .style('pointer-events', 'none')
             .style('opacity', 0);
 
-        const context = canvas.getContext('2d');
-        if (!context) return;
-
         const numStars = 200;
         const stars = Array.from({ length: numStars }, () => ({
             x: Math.random() * width,
@@ -54,33 +51,39 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
         }));
 
         const drawBackground = () => {
-            context.fillStyle = "black";
-            context.fillRect(0, 0, width, height);
+            svg.append('rect')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('fill', 'black');
 
             stars.forEach(star => {
-                context.beginPath();
-                context.arc(star.x, star.y, star.radius, 0, 2 * Math.PI);
-                context.fillStyle = "white";
-                context.fill();
+                svg.append('circle')
+                    .attr('cx', star.x)
+                    .attr('cy', star.y)
+                    .attr('r', star.radius)
+                    .attr('fill', 'white');
             });
 
             // Add title to the top center of the background
-            context.fillStyle = "white";
-            context.font = "24px Arial";
-            context.textAlign = "center";
-            context.fillText("Visualisation of Ireland's Global Exports", width / 2, 40);
+            svg.append('text')
+                .attr('x', width / 2)
+                .attr('y', 40)
+                .attr('fill', 'white')
+                .attr('font-size', '24px')
+                .attr('text-anchor', 'middle')
+                .text("Visualisation of Ireland's Global Exports");
         };
 
         const drawSankey = () => {
-            if (!context) return;
-
             // Prepare the trade data
             const tradeData: { [key: string]: number } = {};
+            let total = 0;
             data.forEach((row) => {
                 if (row["Year"] === year && row["Commodity Group"] !== "Total merchandise trade (0 - 9)") {
                     const commodityGroup = row["Commodity Group"] as string;
-                    const value = Number(row["VALUE"]);
+                    const value = Number(row["VALUE"]) * 1000;
                     tradeData[commodityGroup] = (tradeData[commodityGroup] || 0) + value;
+                    total += value;
                 }
             });
 
@@ -94,35 +97,51 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
             };
 
             const objectEntries = Object.entries(tradeData);
-            for (let i = 0; i < objectEntries.length; i++) {
-                const commodity = objectEntries[i][0];
-                const value = objectEntries[i][1];
-                graph.nodes.push({ id: commodity });
-                graph.links.push({
-                    source: objectEntries.length,
-                    target: i,
-                    value,
-                });
-            }
 
+            let nodeIndex = 0;
             graph.nodes.push({ id: country });
+            nodeIndex++;
 
-            console.log("Sankey graph:", graph);
+            graph.nodes.push({ id: "Other Exports" });
+            nodeIndex++;
+
+            graph.links.push({
+                source: 0,
+                target: 1,
+                value: 0,
+            });
+
+            objectEntries.forEach((entry) => {
+                const commodity = entry[0];
+                const value = entry[1];
+                const portion = value / total;
+                if (portion > 0.02) {
+                    graph.nodes.push({ id: commodity });
+                    graph.links.push({
+                        source: 0,
+                        target: nodeIndex,
+                        value,
+                    });
+                    nodeIndex++;
+                } else {
+                    graph.links[0].value += value;
+                }
+            });
 
             if (graph.nodes.length === 1 || graph.links.length === 0) {
                 console.error("Sankey graph data is incomplete.");
                 return;
             }
 
-            const paddingHeight = 20; // Adjust as needed
+            const paddingHeight = 60; // Adjust as needed
             const padding = 20;
-            const width = canvas.width - padding * 2;
-            const height = canvas.height - paddingHeight * 2;
+            const width = Number(svg.attr('width')) - padding * 2;
+            const height = Number(svg.attr('height')) - paddingHeight * 2;
 
             // Create a Sankey generator
             const sankeyGenerator = sankey<SankeyNode<{ id: string }, {}>, SankeyLink<{}, {}>>()
-                .nodeWidth(80)
-                .nodePadding(6)
+                .nodeWidth(100)
+                .nodePadding(20)
                 .extent([[padding, paddingHeight], [padding + width, paddingHeight + height]]);
 
             const sankeyData = sankeyGenerator(graph);
@@ -133,67 +152,81 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
             }
 
             const { nodes, links } = sankeyData;
+            // Merge links with width less than 1 into "Other Commodities"
+            const otherLinks = links.filter(link => link.width && link.width < 1);
+            const otherValue = otherLinks.reduce((acc, link) => acc + (link.value || 0), 0);
 
-            // Draw links
-            links.forEach((link) => {
-                const sourceNode = link.source as SankeyNode<{ id: string }, {}>;
-                const targetNode = link.target as SankeyNode<{}, {}>;
+            if (otherValue > 0) {
+                const otherNode = { id: "Other Commodities" };
+                graph.nodes.push(otherNode);
 
-                context.beginPath();
-                const gradient = context.createLinearGradient(
-                    sourceNode.x1!,
-                    sourceNode.y0!,
-                    targetNode.x0!,
-                    targetNode.y1!
-                );
+                otherLinks.forEach(link => {
+                    link.target = graph.nodes.length - 1;
+                });
 
-                gradient.addColorStop(0, "rgba(0, 128, 255, 0.7)");
-                gradient.addColorStop(1, "rgba(255, 128, 0, 0.5)");
+                graph.links.push({
+                    source: objectEntries.length,
+                    target: graph.nodes.length - 1,
+                    value: otherValue,
+                });
+            }
 
-                context.strokeStyle = gradient;
-                context.lineWidth = Math.max(1, link.width || 0);
-                context.moveTo(sourceNode.x1!, link.y0!);
-                context.bezierCurveTo(
-                    sourceNode.x1! + link.width! / 2,
-                    link.y0!,
-                    targetNode.x0! - link.width! / 2,
-                    link.y1!,
-                    targetNode.x0!,
-                    link.y1!
-                );
-                context.stroke();
-            });
+            // Filter out the merged links
+            const filteredLinks = links.filter(link => link.width && link.width >= 1);
+
+            const link = svg.append("g")
+                .attr("fill", "none")
+                .attr("stroke-opacity", 0.5)
+                .selectAll("path")
+                .data(filteredLinks)
+                .enter().append("path")
+                .attr("d", sankeyLinkHorizontal())
+                .attr("stroke", (d) => {
+                    const gradientId = `gradient-${d.index}`;
+                    const gradient = svg.append("defs")
+                        .append("linearGradient")
+                        .attr("id", gradientId)
+                        .attr("gradientUnits", "userSpaceOnUse")
+                        .attr("x1", Number((d.source as SankeyNode<{ id: string }, {}>).x1))
+                        .attr("x2", Number((d.target as SankeyNode<{ id: string }, {}>).x0));
+
+                    gradient.append("stop")
+                        .attr("offset", "0%")
+                        .attr("stop-color", "rgba(0, 128, 255, 0.7)");
+
+                    gradient.append("stop")
+                        .attr("offset", "100%")
+                        .attr("stop-color", "rgba(255, 128, 0, 0.5)");
+
+                    return `url(#${gradientId})`;
+                })
+                .attr("stroke-width", (d) => Math.max(1, d.width || 0));
 
             // Draw nodes
-            for (let i = 0; i < nodes.length; i++) {
-                const node = nodes[i];
-                context.beginPath();
-                context.rect(
-                    node.x0!,
-                    node.y0!,
-                    node.x1! - node.x0!,
-                    node.y1! - node.y0!
-                );
-                context.fillStyle = "#4682B4";
-                context.fill();
-                context.strokeStyle = "#000";
-                context.stroke();
+            const node = svg.append("g")
+                .selectAll(".node")
+                .data(nodes)
+                .enter().append("g")
+                .attr("class", "node")
+                .attr("transform", d => `translate(${d.x0},${d.y0})`);
 
-                // Add node labels
-                if (node.targetLinks?.length && node.targetLinks[0]?.width && node.targetLinks[0].width > 3 || node.id === country) {
-                    context.fillStyle = "rgba(255, 255, 255, 1)";
-                    context.font = "12px Arial";
-                    context.textAlign = "right";
-                    let centerX = (node.x0! + node.x1!) / 2 + 30;
-                    if (node.id === country) {
-                        context.textAlign = "center";
-                        centerX = (node.x0! + node.x1!) / 2;
-                        context.font = "20px Arial";
-                    }
-                    const centerY = (node.y0! + node.y1!) / 2;
-                    context.fillText(node.id, centerX, centerY);
-                }
-            };
+            node.append("rect")
+                .attr("x", 0)
+                .attr("y", 0)
+                .attr("height", d => (d.y1 ?? 0) - (d.y0 ?? 0))
+                .attr("width", d => (d.x1 ?? 0) - (d.x0 ?? 0))
+                .attr("fill", "#4682B4")
+                .attr("stroke", "#000");
+
+
+            node.append("text")
+                .attr("x", d => d.id === country ? ((d.x1 ?? 0) - (d.x0 ?? 0)) / 2 : ((d.x1 ?? 0) - (d.x0 ?? 0)) / 2 + 45)
+                .attr("y", d => ((d.y1 ?? 0) - (d.y0 ?? 0)) / 2)
+                .attr("dy", "0.35em")
+                .attr("text-anchor", d => d.id === country ? "middle" : "end")
+                .attr("fill", "white")
+                .attr("font-size", d => d.id === country ? "20px" : "13px")
+                .text(d => d.id.split('(')[0].trim());
 
             // Prepare the tooltip
             const tooltip = d3.select(containerRef.current)
@@ -207,8 +240,8 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 .style('opacity', 0);
 
             // Add mouseover event for tooltip
-            canvas.addEventListener('mousemove', (event) => {
-                const [x, y] = [event.offsetX, event.offsetY];
+            svg.on('mousemove', (event) => {
+                const [x, y] = d3.pointer(event);
                 const hoveredNode = nodes.find((node) =>
                     x >= node.x0! && x <= node.x1! && y >= node.y0! && y <= node.y1!
                 );
@@ -216,7 +249,7 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
 
                 if (hoveredNode) {
                     tooltip.style('opacity', 1)
-                        .html(`<b>Category:</b> ${hoveredNode.id.split('(')[0].trim()}<br/><b>Value:</b> \$${Number(value).toLocaleString()}`)
+                        .html(`<b>Category:</b> ${hoveredNode.id.split('(')[0].trim()}<br/><b>Value:</b> €${Math.round(Number(value) / 1000000000).toLocaleString()} billion`)
                         .style('left', `${event.pageX - 300}px`)
                         .style('top', `${event.pageY - 80}px`)
                         .style('color', 'black');
@@ -225,7 +258,7 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 }
             });
 
-            canvas.addEventListener('mouseout', () => {
+            svg.on('mouseout', () => {
                 tooltip.style('opacity', 0);
             });
         };
@@ -240,12 +273,12 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
         if (!irelandCoords) return;
 
         const projection = d3.geoOrthographic()
-            .scale(Math.min(width, height) / 2.2 * zoomLevel.current)
+            .scale(baseScale * zoomLevel.current)
             .translate([width / 2, height / 2])
             .clipAngle(90)
             .rotate(rotation.current);
 
-        const path = d3.geoPath(projection, context);
+        const path = d3.geoPath(projection);
 
         const drawLinks = () => {
             const links: { source: [number, number]; target: [number, number]; exportValue: number; country: string; value: number; }[] = [];
@@ -254,12 +287,12 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
             for (let i = 0; i < data.length; i++) {
                 if (data[i]["Commodity Group"] !== category || data[i]["Year"] !== year) continue;
                 let country = data[i].Country;
-                let exportValue = Number(data[i]["VALUE"]);
+                let exportValue = Number(data[i]["VALUE"]) * 1000;
 
                 if (country === "USA") country = "United States of America";
                 if (country === "Great Britain") {
                     country = "United Kingdom";
-                    exportValue += Number(data[i + 1]["VALUE"]);
+                    exportValue += Number(data[i + 1]["VALUE"]) * 1000;
                 }
 
                 const targetCountry = countries.features.find(
@@ -287,6 +320,9 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 link.value = (link.exportValue / maxExportValue);
             });
 
+            const linkGroup = svg.append("g")
+                .attr("class", "links");
+
             links.forEach(link => {
                 const { source, target, value, country } = link;
                 const lineWidth = value * 50;
@@ -300,69 +336,71 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                     const point1 = interpolate(t1);
                     const point2 = interpolate(t2);
 
-                    context.beginPath();
-                    path({
-                        type: "LineString",
-                        coordinates: [point1, point2]
-                    } as d3.GeoPermissibleObjects);
-                    context.strokeStyle = color;
-                    context.lineWidth = 1 + (lineWidth * t2);
-                    context.lineCap = "round";
-                    context.stroke();
+                    linkGroup.append("path")
+                        .datum({
+                            type: "LineString",
+                            coordinates: [point1, point2]
+                        })
+                        .attr("d", path as any)
+                        .attr("stroke", color)
+                        .attr("stroke-width", 1 + (lineWidth * t2))
+                        .attr("stroke-linecap", "round")
+                        .attr("fill", "none");
                 }
             });
         };
 
         const draw = () => {
-            context.save();
-            context.clearRect(0, 0, width, height);
+            svg.selectAll('*').remove();
 
             drawBackground();
             drawSankey();
 
-            context.beginPath();
-            path({ type: "Sphere" });
-            context.clip();
-
-            context.beginPath();
-            path({ type: "Sphere" });
-            context.fillStyle = "#87CEEB";
-            context.fill();
+            svg.append("path")
+                .datum({ type: "Sphere" })
+                .attr("d", path as unknown as string)
+                .attr("fill", "#87CEEB");
 
             if ("features" in countries) {
-                countries.features.forEach((feature) => {
-                    context.beginPath();
-                    path(feature);
-                    if (feature.properties && feature.properties.name === "Ireland") {
-                        context.fillStyle = '#009A49';
-                    } else {
-                        context.fillStyle = '#C2D784';
-                    }
-                    context.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-                    context.lineWidth = 0.2 * zoomLevel.current;
-                    context.fill();
+                svg.selectAll(".country")
+                    .data(countries.features)
+                    .enter().append("path")
+                    .attr("class", "country")
+                    .attr("d", path)
+                    .attr("fill", (d) => d.properties?.name === "Ireland" ? '#009A49' : '#C2D784')
+                    .attr("stroke", 'rgba(0, 0, 0, 0.5)')
+                    .attr("stroke-width", 0.2 * zoomLevel.current)
+                    .attr("stroke-linejoin", "round")
+                    .on('mouseover', (event, d) => {
+                        tooltip.style('opacity', 1)
+                            .html(d.properties?.name)
+                            .style('color', 'black');
+                    })
+                    .on('mousemove', (event) => {
+                        tooltip.style('left', `${event.pageX + 10}px`)
+                            .style('top', `${event.pageY + 10}px`);
+                    })
+                    .on('mouseout', () => {
+                        tooltip.style('opacity', 0);
+                    });
 
-                    if (context.lineWidth < 0.4) {
-                        context.lineWidth = 0.4;
-                    }
-
-                    context.stroke();
-                });
+                svg.selectAll(".country")
+                    .attr("stroke-width", function () {
+                        return Math.max(0.4, 0.2 * zoomLevel.current);
+                    });
             }
 
             drawLinks();
-
-            context.restore();
         };
 
-        const drag = d3.drag<HTMLCanvasElement, unknown>()
+        const drag = d3.drag<SVGSVGElement, unknown>()
             .on('start', (event) => {
                 event.sourceEvent.preventDefault();
             })
             .on('drag', (event) => {
                 const dx = event.dx;
                 const dy = event.dy;
-                const rotationSpeed = 0.2 / zoomLevel.current;
+                const rotationSpeed = 0.3 / zoomLevel.current;
                 rotation.current[0] += dx * rotationSpeed;
                 rotation.current[1] -= dy * rotationSpeed;
 
@@ -370,49 +408,26 @@ export default function GlobeMap({ data, category, year, onCountrySelect }: MapP
                 draw();
             });
 
-        d3.select(canvas).call(drag);
+        const svgNode = svg.node();
+        if (svgNode) {
+            d3.select(svgNode).call(drag);
+        }
 
         draw();
 
-        const zoom = d3.zoom<HTMLCanvasElement, unknown>()
+        const zoom = d3.zoom<SVGSVGElement, unknown>()
             .scaleExtent([0.8, 9])
             .on('zoom', (event) => {
+                // Apply the zoom scale to the projection
+                projection.scale(baseScale * event.transform.k);
                 zoomLevel.current = event.transform.k;
-                projection.scale(Math.min(width, height) / 2.2 * zoomLevel.current);
                 draw();
             });
 
-        d3.select(canvas).call(zoom).call(zoom.transform, d3.zoomIdentity.scale(zoomLevel.current));
+        d3.select(svg.node() as SVGSVGElement).call(zoom).call(zoom.transform, d3.zoomIdentity.scale(zoomLevel.current));
 
-        canvas.addEventListener('mousemove', (event) => {
-            const [x, y] = [event.offsetX, event.offsetY];
-            const invert = projection.invert ? projection.invert([x, y]) : null;
-
-            if (invert && "features" in countries) {
-                const feature = countries.features.find((f) => {
-                    return f.geometry && d3.geoContains(f, invert);
-                });
-
-                if (feature && feature.properties && feature.properties.name) {
-                    tooltip.style('opacity', 1)
-                        .html(feature.properties.name)
-                        .style('left', `${event.pageX + 10}px`)
-                        .style('top', `${event.pageY + 10}px`)
-                        .style('color', 'black');
-                } else {
-                    tooltip.style('opacity', 0);
-                }
-            } else {
-                tooltip.style('opacity', 0);
-            }
-        });
-
-        canvas.addEventListener('mouseout', () => {
-            tooltip.style('opacity', 0);
-        });
-
-        canvas.addEventListener('click', (event) => {
-            const [x, y] = [event.offsetX, event.offsetY];
+        svg.on('click', (event) => {
+            const [x, y] = d3.pointer(event);
             const invert = projection.invert ? projection.invert([x, y]) : null;
 
             if (invert && "features" in countries) {

@@ -7,7 +7,8 @@ import GlobeMap from "@/components/globe-map"
 import PieChart from "@/components/pie-chart"
 import * as d3 from "d3"
 
-import { Check, ChevronsUpDown, LoaderCircle, Database } from "lucide-react"
+import { Check, ChevronsUpDown, LoaderCircle, Database, ChartLine } from "lucide-react"
+import LineChart from "@/components/line-chart"
 
 import { cn } from "@/lib/utils"
 import {
@@ -79,7 +80,7 @@ export default function Home() {
   return (
     <>
       <main className="relative min-h-screen">
-        <div className="fixed top-4 left-4 z-50">
+        <div className="fixed bottom-4 left-4 z-50">
           <Card className="w-80 bg-background/70 backdrop-blur-sm shadow-lg">
             <CardContent className="p-4">
               <YearSlider
@@ -131,8 +132,22 @@ export default function Home() {
                   </Command>
                 </PopoverContent>
               </Popover>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="default" className="w-full mt-3"><ChartLine/>Yearly Exports Chart</Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-[850px]">
+                  <DialogHeader>
+                    <DialogTitle>Category: {value.split('(')[0].trim()}</DialogTitle>
+                    <DialogDescription>
+                      Showing yearly exports from 2000 to 2023.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <LineChart data={data} category={value} />
+                </DialogContent>
+              </Dialog>
               <a href="https://data.cso.ie/table/TSA10" target="_blank" rel="noopener noreferrer">
-                <Button variant="outline" className="w-full mt-3">
+                <Button variant="secondary" className="w-full mt-3">
                   <Database />
                   View Data Source
                 </Button>
@@ -159,9 +174,9 @@ export default function Home() {
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
         <DialogContent>
           <DialogHeader className="pb-0">
-            <DialogTitle>Irish Exports to {selectedCountry}</DialogTitle>
+            <DialogTitle>Exports to {selectedCountry} ({year})</DialogTitle>
             <DialogDescription>
-              Showing breakdown of exports for the year {year}
+              Showing breakdown of exports to {selectedCountry} for the year {year}.
             </DialogDescription>
           </DialogHeader>
 

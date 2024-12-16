@@ -20,10 +20,10 @@ export default function DonutChart({ data, country, year }: ChartProps) {
         data.forEach((row) => {
             if (row["Country"] === country && row["Year"] === year) {
                 if (row["Commodity Group"] === "Total merchandise trade (0 - 9)") {
-                    totalValue = Math.round(Number(row["VALUE"]));
+                    totalValue = Math.round(Number(row["VALUE"]) * 1000);
                 } else {
                     const commodity = row["Commodity Group"];
-                    const value = Math.round(Number(row["VALUE"]));
+                    const value = Math.round(Number(row["VALUE"]) * 1000);
                     if (!isNaN(value)) {
                         segments.push({ key: commodity, value });
                     }
@@ -90,7 +90,7 @@ export default function DonutChart({ data, country, year }: ChartProps) {
             .style("opacity", 0.7)
             .on("mouseover", (event, d) => {
                 tooltip.style("opacity", 1)
-                    .html(`<b>Category:</b> ${d.data.key.split('(')[0].trim()}<br/><b>Value:</b> \$${d.data.value.toLocaleString()}`)
+                    .html(`<b>Category:</b> ${d.data.key.split('(')[0].trim()}<br/><b>Value:</b> €${(d.data.value / 1000000000).toFixed(2).toLocaleString()} billion`)
                     .style("min-width", "300px")
                     .style("left", `${event.offsetX + 10}px`)
                     .style("top", `${event.offsetY + 10}px`)
@@ -110,7 +110,7 @@ export default function DonutChart({ data, country, year }: ChartProps) {
             .style("font-size", "28px")
             .style("font-weight", "bold")
             .style("fill", "white")
-            .text(`\$${totalValue.toLocaleString()}`);
+            .text(`€${(totalValue / 1000000000).toFixed(1)} billion`);
     }, [data, country, year]);
 
     return <svg ref={svgRef} />;
